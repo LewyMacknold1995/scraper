@@ -18,10 +18,12 @@ class RestaurantScraper:
         self.sia = SentimentIntensityAnalyzer()
         
     def search_restaurants(self, location: str) -> List[Dict]:
+        """Search for restaurants in a given location"""
         restaurants = []
         query = f"restaurants in {location}"
         
         try:
+            # Initial request
             url = f"{self.places_endpoint}?query={query}&type=restaurant&key={self.api_key}"
             response = requests.get(url)
             results = response.json()
@@ -29,9 +31,12 @@ class RestaurantScraper:
             if results.get('status') != 'OK':
                 raise Exception(f"API request failed: {results.get('status')}")
             
+            # Process first page of results
             for place in results.get('results', []):
                 restaurant_data = self._get_place_details(place['place_id'])
                 if restaurant_data:
+                    hygiene_data = self._get_hygiene_rating(restaurant_data)
+                    restaurant_data.update(hygiene_data)
                     restaurants.append(restaurant_data)
             
             return restaurants
@@ -41,11 +46,12 @@ class RestaurantScraper:
             return []
 
     def _get_place_details(self, place_id: str) -> Dict:
+        """Get detailed information about a specific place"""
         try:
             fields = [
                 'name', 'formatted_phone_number', 'website', 'formatted_address',
                 'opening_hours', 'price_level', 'rating', 'reviews', 'user_ratings_total',
-                'types', 'business_status', 'photos'
+                'types', 'business_status'
             ]
             
             url = f"{self.details_endpoint}?place_id={place_id}&fields={','.join(fields)}&key={self.api_key}"
@@ -82,7 +88,45 @@ class RestaurantScraper:
             print(f"Error getting place details: {str(e)}")
             return None
 
+    def _get_hygiene_rating(self, restaurant_data: Dict) -> Dict:
+        """Get food hygiene rating from FSA API"""
+        try:
+            address = restaurant_data['address']
+            postcode = address.split(',')[-1].strip()
+            name = restaurant_data['name']
+            
+            url = "http://api.ratings.food.gov.uk/Establishments"
+            headers = {
+                'x-api-version': '2',
+                'Accept': 'application/json'
+            }
+            params = {
+                'address': postcode,
+                'name': name
+            }
+            
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+            
+            if data['establishments']:
+                establishment = data['establishments'][0]
+                return {
+                    'hygiene_rating': establishment.get('RatingValue', ''),
+                    'last_inspection': establishment.get('RatingDate', ''),
+                    'hygiene_score': {
+                        'food_hygiene': establishment.get('Scores', {}).get('Hygiene', ''),
+                        'structural': establishment.get('Scores', {}).get('Structural', ''),
+                        'management': establishment.get('Scores', {}).get('ConfidenceInManagement', '')
+                    }
+                }
+            return {}
+            
+        except Exception as e:
+            print(f"Error getting hygiene rating: {str(e)}")
+            return {}
+
     def _extract_cuisine_type(self, types: List[str]) -> str:
+        """Extract cuisine type from place types"""
         cuisine_keywords = {
             'restaurant': ['restaurant', 'food', 'meal'],
             'indian': ['indian'],
@@ -101,6 +145,7 @@ class RestaurantScraper:
         return 'Restaurant'
 
     def _analyze_reviews(self, reviews: List[Dict]) -> Dict:
+        """Analyze review sentiment and content"""
         if not reviews:
             return {
                 'average_sentiment': 0,
@@ -152,6 +197,7 @@ class RestaurantScraper:
         }
 
     def _scrape_website_data(self, url: str) -> Dict:
+        """Scrape additional data from restaurant website"""
         try:
             response = requests.get(url, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
