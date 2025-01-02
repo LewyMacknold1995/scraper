@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
+import { Search, Download, Star, Clock, ThumbsUp, BadgePound } from 'lucide-react';
 import axios from 'axios';
-import { Search, Download } from 'lucide-react';
 
 interface Restaurant {
   name: string;
@@ -8,6 +8,19 @@ interface Restaurant {
   phone: string;
   website: string;
   address: string;
+  cuisine_type: string;
+  price_level: string;
+  rating: number;
+  total_reviews: number;
+  opening_hours: string[];
+  review_stats: {
+    average_sentiment: number;
+    recent_reviews: Array<{
+      text: string;
+      rating: number;
+      sentiment: number;
+    }>;
+  };
 }
 
 const RestaurantFinder = () => {
@@ -38,7 +51,7 @@ const RestaurantFinder = () => {
   const exportToCsv = () => {
     if (results.length === 0) return;
     
-    const headers = ['Name', 'Email', 'Phone', 'Website', 'Address'];
+    const headers = ['Name', 'Email', 'Phone', 'Website', 'Address', 'Cuisine', 'Price', 'Rating', 'Reviews'];
     const csvContent = [
       headers.join(','),
       ...results.map(r => [
@@ -46,7 +59,11 @@ const RestaurantFinder = () => {
         r.email,
         r.phone,
         r.website,
-        r.address
+        r.address,
+        r.cuisine_type,
+        r.price_level,
+        r.rating,
+        r.total_reviews
       ].map(field => `"${field || ''}"`).join(','))
     ].join('\n');
 
@@ -61,12 +78,18 @@ const RestaurantFinder = () => {
     window.URL.revokeObjectURL(url);
   };
 
+  const getSentimentColor = (sentiment: number) => {
+    if (sentiment > 0.5) return 'text-green-500';
+    if (sentiment > 0) return 'text-blue-500';
+    if (sentiment > -0.5) return 'text-yellow-500';
+    return 'text-red-500';
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-4">
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-white rounded-lg shadow-lg p-6">
         <h1 className="text-2xl font-bold mb-6">Restaurant Lead Finder</h1>
         
-        {/* Search Section */}
         <div className="flex gap-4 mb-6">
           <input
             type="text"
@@ -86,14 +109,12 @@ const RestaurantFinder = () => {
           </button>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="text-red-500 mb-4">
             {error}
           </div>
         )}
 
-        {/* Results Section */}
         {results.length > 0 && (
           <div>
             <div className="flex justify-between items-center mb-4">
@@ -109,47 +130,98 @@ const RestaurantFinder = () => {
               </button>
             </div>
             
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="p-3 text-left border">Name</th>
-                    <th className="p-3 text-left border">Email</th>
-                    <th className="p-3 text-left border">Phone</th>
-                    <th className="p-3 text-left border">Website</th>
-                    <th className="p-3 text-left border">Address</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((restaurant, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="p-3 border font-medium">{restaurant.name}</td>
-                      <td className="p-3 border">
+            <div className="grid gap-6">
+              {results.map((restaurant, index) => (
+                <div key={index} className="border rounded-lg p-4 hover:bg-gray-50">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="text-xl font-bold text-blue-600">{restaurant.name}</h3>
+                      <div className="text-gray-600 text-sm flex items-center gap-2">
+                        <span>{restaurant.cuisine_type}</span>
+                        <span className="font-mono">{restaurant.price_level}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Star className="text-yellow-400" size={20} />
+                      <span className="font-bold">{restaurant.rating}</span>
+                      <span className="text-gray-500">({restaurant.total_reviews} reviews)</span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                      <h4 className="font-semibold mb-2">Contact Details</h4>
+                      <div className="space-y-1 text-sm">
                         {restaurant.email && (
-                          <a href={`mailto:${restaurant.email}`} className="text-blue-500 hover:underline">
-                            {restaurant.email}
-                          </a>
+                          <div>
+                            <a href={`mailto:${restaurant.email}`} className="text-blue-500 hover:underline">
+                              {restaurant.email}
+                            </a>
+                          </div>
                         )}
-                      </td>
-                      <td className="p-3 border">
                         {restaurant.phone && (
-                          <a href={`tel:${restaurant.phone}`} className="text-blue-500 hover:underline">
-                            {restaurant.phone}
-                          </a>
+                          <div>
+                            <a href={`tel:${restaurant.phone}`} className="text-blue-500 hover:underline">
+                              {restaurant.phone}
+                            </a>
+                          </div>
                         )}
-                      </td>
-                      <td className="p-3 border">
                         {restaurant.website && (
-                          <a href={restaurant.website} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                            Visit Website
-                          </a>
+                          <div>
+                            <a href={restaurant.website} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                              Visit Website
+                            </a>
+                          </div>
                         )}
-                      </td>
-                      <td className="p-3 border">{restaurant.address}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <div className="text-gray-600">{restaurant.address}</div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      {restaurant.opening_hours && restaurant.opening_hours.length > 0 && (
+                        <div>
+                          <h4 className="font-semibold mb-2 flex items-center gap-2">
+                            <Clock size={16} />
+                            Opening Hours
+                          </h4>
+                          <div className="text-sm space-y-1">
+                            {restaurant.opening_hours.map((hours, idx) => (
+                              <div key={idx} className="text-gray-600">{hours}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {restaurant.review_stats && (
+                    <div className="mt-4 border-t pt-4">
+                      <h4 className="font-semibold mb-2 flex items-center gap-2">
+                        <ThumbsUp size={16} />
+                        Review Analysis
+                      </h4>
+                      <div className="text-sm">
+                        <div className={`font-medium ${getSentimentColor(restaurant.review_stats.average_sentiment)}`}>
+                          Sentiment Score: {(restaurant.review_stats.average_sentiment * 100).toFixed(1)}%
+                        </div>
+                        {restaurant.review_stats.recent_reviews && (
+                          <div className="mt-2 space-y-2">
+                            {restaurant.review_stats.recent_reviews.map((review, idx) => (
+                              <div key={idx} className="text-gray-600 text-sm">
+                                "{review.text}"
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Star size={14} className="text-yellow-400" />
+                                  {review.rating}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
