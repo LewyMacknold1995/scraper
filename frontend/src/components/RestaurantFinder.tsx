@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Download, Star, Clock, ThumbsUp } from 'lucide-react';import axios from 'axios';
+import { Search, Download, Star, Clock, ThumbsUp } from 'lucide-react';
 
 interface Restaurant {
   name: string;
@@ -20,7 +20,48 @@ interface Restaurant {
       sentiment: number;
     }>;
   };
+  hygiene_rating?: {
+    rating: string;
+    last_inspection: string;
+    scores: {
+      food_hygiene: string;
+      structural: string;
+      management: string;
+    };
+  };
 }
+
+const HygieneRating = ({ rating, lastInspection, scores }: any) => {
+  const getRatingColor = (rating: string) => {
+    const num = parseInt(rating);
+    if (num >= 4) return 'text-green-500';
+    if (num >= 3) return 'text-yellow-500';
+    return 'text-red-500';
+  };
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <h4 className="font-semibold mb-2">Food Hygiene Rating</h4>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className={`text-2xl font-bold ${getRatingColor(rating)}`}>
+            {rating} / 5
+          </div>
+          <div className="text-sm text-gray-600">
+            Last Inspection: {new Date(lastInspection).toLocaleDateString()}
+          </div>
+        </div>
+        {scores && (
+          <div className="text-sm space-y-1">
+            <div>Food Hygiene: {scores.food_hygiene}</div>
+            <div>Structural: {scores.structural}</div>
+            <div>Management: {scores.management}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const RestaurantFinder = () => {
   const [location, setLocation] = useState('');
@@ -38,8 +79,12 @@ const RestaurantFinder = () => {
     setError('');
     
     try {
-      const response = await axios.get(`http://localhost:8000/api/restaurants?location=${encodeURIComponent(location)}`);
-      setResults(response.data);
+      const response = await fetch(`http://localhost:8000/api/restaurants?location=${encodeURIComponent(location)}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch data');
+      }
+      const data = await response.json();
+      setResults(data);
     } catch (err) {
       setError('Failed to fetch restaurant data. Please try again.');
     } finally {
@@ -50,7 +95,7 @@ const RestaurantFinder = () => {
   const exportToCsv = () => {
     if (results.length === 0) return;
     
-    const headers = ['Name', 'Email', 'Phone', 'Website', 'Address', 'Cuisine', 'Price', 'Rating', 'Reviews'];
+    const headers = ['Name', 'Email', 'Phone', 'Website', 'Address', 'Cuisine', 'Price', 'Rating', 'Reviews', 'Hygiene Rating'];
     const csvContent = [
       headers.join(','),
       ...results.map(r => [
@@ -62,7 +107,8 @@ const RestaurantFinder = () => {
         r.cuisine_type,
         r.price_level,
         r.rating,
-        r.total_reviews
+        r.total_reviews,
+        r.hygiene_rating?.rating || 'N/A'
       ].map(field => `"${field || ''}"`).join(','))
     ].join('\n');
 
@@ -192,6 +238,14 @@ const RestaurantFinder = () => {
                       )}
                     </div>
                   </div>
+
+                  {restaurant.hygiene_rating && (
+                    <HygieneRating
+                      rating={restaurant.hygiene_rating.rating}
+                      lastInspection={restaurant.hygiene_rating.last_inspection}
+                      scores={restaurant.hygiene_rating.scores}
+                    />
+                  )}
 
                   {restaurant.review_stats && (
                     <div className="mt-4 border-t pt-4">
