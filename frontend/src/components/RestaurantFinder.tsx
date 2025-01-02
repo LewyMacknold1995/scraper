@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Download, Star, Clock, ThumbsUp, BadgePound } from 'lucide-react';
-import axios from 'axios';
+import { Search, Download, Star, Clock, ThumbsUp } from 'lucide-react';import axios from 'axios';
 
 interface Restaurant {
   name: string;
