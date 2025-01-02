@@ -10,28 +10,26 @@ import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 
 class RestaurantScraper:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
+    def __init__(self, google_api_key: str, fsa_api_key: str = ''):
+        self.google_api_key = google_api_key
+        self.fsa_api_key = fsa_api_key
         self.places_endpoint = "https://maps.googleapis.com/maps/api/place/textsearch/json"
         self.details_endpoint = "https://maps.googleapis.com/maps/api/place/details/json"
         nltk.download('vader_lexicon', quiet=True)
         self.sia = SentimentIntensityAnalyzer()
         
     def search_restaurants(self, location: str) -> List[Dict]:
-        """Search for restaurants in a given location"""
         restaurants = []
         query = f"restaurants in {location}"
         
         try:
-            # Initial request
-            url = f"{self.places_endpoint}?query={query}&type=restaurant&key={self.api_key}"
+            url = f"{self.places_endpoint}?query={query}&type=restaurant&key={self.google_api_key}"
             response = requests.get(url)
             results = response.json()
             
             if results.get('status') != 'OK':
                 raise Exception(f"API request failed: {results.get('status')}")
             
-            # Process first page of results
             for place in results.get('results', []):
                 restaurant_data = self._get_place_details(place['place_id'])
                 if restaurant_data:
@@ -46,7 +44,6 @@ class RestaurantScraper:
             return []
 
     def _get_place_details(self, place_id: str) -> Dict:
-        """Get detailed information about a specific place"""
         try:
             fields = [
                 'name', 'formatted_phone_number', 'website', 'formatted_address',
@@ -54,7 +51,7 @@ class RestaurantScraper:
                 'types', 'business_status'
             ]
             
-            url = f"{self.details_endpoint}?place_id={place_id}&fields={','.join(fields)}&key={self.api_key}"
+            url = f"{self.details_endpoint}?place_id={place_id}&fields={','.join(fields)}&key={self.google_api_key}"
             response = requests.get(url)
             details = response.json()
             
@@ -89,10 +86,12 @@ class RestaurantScraper:
             return None
 
     def _get_hygiene_rating(self, restaurant_data: Dict) -> Dict:
-        """Get food hygiene rating from FSA API"""
         try:
             address = restaurant_data['address']
+            # Extract postcode (last part after comma)
             postcode = address.split(',')[-1].strip()
+            # Remove 'UK' if present
+            postcode = postcode.replace('UK', '').strip()
             name = restaurant_data['name']
             
             url = "http://api.ratings.food.gov.uk/Establishments"
@@ -100,23 +99,32 @@ class RestaurantScraper:
                 'x-api-version': '2',
                 'Accept': 'application/json'
             }
+            if self.fsa_api_key:
+                headers['x-api-key'] = self.fsa_api_key
+
             params = {
                 'address': postcode,
                 'name': name
             }
             
             response = requests.get(url, headers=headers, params=params)
+            if response.status_code != 200:
+                print(f"FSA API error: {response.status_code}")
+                return {}
+
             data = response.json()
             
-            if data['establishments']:
+            if data.get('establishments', []):
                 establishment = data['establishments'][0]
                 return {
-                    'hygiene_rating': establishment.get('RatingValue', ''),
-                    'last_inspection': establishment.get('RatingDate', ''),
-                    'hygiene_score': {
-                        'food_hygiene': establishment.get('Scores', {}).get('Hygiene', ''),
-                        'structural': establishment.get('Scores', {}).get('Structural', ''),
-                        'management': establishment.get('Scores', {}).get('ConfidenceInManagement', '')
+                    'hygiene_rating': {
+                        'rating': establishment.get('RatingValue', ''),
+                        'last_inspection': establishment.get('RatingDate', ''),
+                        'scores': {
+                            'food_hygiene': establishment.get('Scores', {}).get('Hygiene', ''),
+                            'structural': establishment.get('Scores', {}).get('Structural', ''),
+                            'management': establishment.get('Scores', {}).get('ConfidenceInManagement', '')
+                        }
                     }
                 }
             return {}
@@ -126,7 +134,6 @@ class RestaurantScraper:
             return {}
 
     def _extract_cuisine_type(self, types: List[str]) -> str:
-        """Extract cuisine type from place types"""
         cuisine_keywords = {
             'restaurant': ['restaurant', 'food', 'meal'],
             'indian': ['indian'],
@@ -145,7 +152,6 @@ class RestaurantScraper:
         return 'Restaurant'
 
     def _analyze_reviews(self, reviews: List[Dict]) -> Dict:
-        """Analyze review sentiment and content"""
         if not reviews:
             return {
                 'average_sentiment': 0,
@@ -172,17 +178,14 @@ class RestaurantScraper:
         }
         
         for review in reviews:
-            # Sentiment analysis
             sentiment = self.sia.polarity_scores(review['text'])
             sentiments.append(sentiment['compound'])
             
-            # Keyword analysis
             text = review['text'].lower()
             for category, words in keywords.items():
                 if any(word in text for word in words):
                     keyword_mentions[category] += 1
             
-            # Store recent reviews
             recent_reviews.append({
                 'text': review['text'][:200] + '...' if len(review['text']) > 200 else review['text'],
                 'rating': review.get('rating', 0),
@@ -197,17 +200,14 @@ class RestaurantScraper:
         }
 
     def _scrape_website_data(self, url: str) -> Dict:
-        """Scrape additional data from restaurant website"""
         try:
             response = requests.get(url, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Extract emails
             page_text = str(soup)
             email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
             emails = re.findall(email_pattern, page_text)
             
-            # Extract social media links
             social_links = {
                 'facebook': None,
                 'instagram': None,
@@ -237,7 +237,8 @@ class RestaurantScraper:
 
 def main():
     api_key = os.getenv('GOOGLE_PLACES_API_KEY')
-    scraper = RestaurantScraper(api_key)
+    fsa_api_key = os.getenv('FSA_API_KEY', '')
+    scraper = RestaurantScraper(api_key, fsa_api_key)
     
     location = "Romford"
     results = scraper.search_restaurants(location)
