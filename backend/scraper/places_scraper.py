@@ -10,9 +10,10 @@ import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 
 class RestaurantScraper:
-    def __init__(self, google_api_key: str, fsa_api_key: str = ''):
+    def __init__(self, google_api_key: str, fsa_api_key: str = '', companies_house_api_key: str = ''):
         self.google_api_key = google_api_key
         self.fsa_api_key = fsa_api_key
+        self.companies_house_api_key = companies_house_api_key
         self.places_endpoint = "https://maps.googleapis.com/maps/api/place/textsearch/json"
         self.details_endpoint = "https://maps.googleapis.com/maps/api/place/details/json"
         nltk.download('vader_lexicon', quiet=True)
@@ -20,22 +21,42 @@ class RestaurantScraper:
         
     def search_restaurants(self, location: str) -> List[Dict]:
         restaurants = []
-        query = f"restaurants in {location}"
+        query = f"(restaurant OR takeaway OR food) in {location}"
+        next_page_token = None
         
         try:
-            url = f"{self.places_endpoint}?query={query}&type=restaurant&key={self.google_api_key}"
-            response = requests.get(url)
-            results = response.json()
-            
-            if results.get('status') != 'OK':
-                raise Exception(f"API request failed: {results.get('status')}")
-            
-            for place in results.get('results', []):
-                restaurant_data = self._get_place_details(place['place_id'])
-                if restaurant_data:
-                    hygiene_data = self._get_hygiene_rating(restaurant_data)
-                    restaurant_data.update(hygiene_data)
-                    restaurants.append(restaurant_data)
+            while True:
+                # Build URL with pagination if needed
+                url = f"{self.places_endpoint}?query={query}&type=restaurant|food&key={self.google_api_key}"
+                if next_page_token:
+                    url += f"&pagetoken={next_page_token}"
+                
+                response = requests.get(url)
+                results = response.json()
+                
+                if results.get('status') != 'OK':
+                    break
+                
+                for place in results.get('results', []):
+                    restaurant_data = self._get_place_details(place['place_id'])
+                    if restaurant_data:
+                        # Add additional data
+                        hygiene_data = self._get_hygiene_rating(restaurant_data)
+                        company_data = self._get_company_details(
+                            restaurant_data['name'], 
+                            restaurant_data['address'].split(',')[-1].strip().replace('UK', '').strip()
+                        )
+                        restaurant_data.update(hygiene_data)
+                        restaurant_data.update(company_data)
+                        restaurants.append(restaurant_data)
+                
+                # Check for next page
+                next_page_token = results.get('next_page_token')
+                if not next_page_token:
+                    break
+                    
+                # Wait before making next request (API requirement)
+                time.sleep(2)
             
             return restaurants
             
@@ -48,7 +69,7 @@ class RestaurantScraper:
             fields = [
                 'name', 'formatted_phone_number', 'website', 'formatted_address',
                 'opening_hours', 'price_level', 'rating', 'reviews', 'user_ratings_total',
-                'types', 'business_status'
+                'types', 'business_status', 'photos'
             ]
             
             url = f"{self.details_endpoint}?place_id={place_id}&fields={','.join(fields)}&key={self.google_api_key}"
@@ -88,10 +109,7 @@ class RestaurantScraper:
     def _get_hygiene_rating(self, restaurant_data: Dict) -> Dict:
         try:
             address = restaurant_data['address']
-            # Extract postcode (last part after comma)
-            postcode = address.split(',')[-1].strip()
-            # Remove 'UK' if present
-            postcode = postcode.replace('UK', '').strip()
+            postcode = address.split(',')[-1].strip().replace('UK', '').strip()
             name = restaurant_data['name']
             
             url = "http://api.ratings.food.gov.uk/Establishments"
@@ -133,23 +151,83 @@ class RestaurantScraper:
             print(f"Error getting hygiene rating: {str(e)}")
             return {}
 
+    def _get_company_details(self, name: str, postcode: str) -> Dict:
+        try:
+            if not self.companies_house_api_key:
+                return {}
+                
+            url = "https://api.companieshouse.gov.uk/search/companies"
+            headers = {'Authorization': self.companies_house_api_key}
+            params = {
+                'q': name,
+                'items_per_page': 10
+            }
+            
+            response = requests.get(url, headers=headers, params=params)
+            companies = response.json().get('items', [])
+            
+            matching_companies = [
+                c for c in companies 
+                if postcode.replace(' ', '').lower() in 
+                c.get('address', {}).get('postal_code', '').replace(' ', '').lower()
+            ]
+            
+            if matching_companies:
+                company = matching_companies[0]
+                company_number = company['company_number']
+                
+                officers_url = f"https://api.companieshouse.gov.uk/company/{company_number}/officers"
+                officers_response = requests.get(officers_url, headers=headers)
+                officers = officers_response.json().get('items', [])
+                
+                return {
+                    'company_info': {
+                        'company_number': company_number,
+                        'date_of_creation': company.get('date_of_creation', ''),
+                        'company_status': company.get('company_status', ''),
+                        'sic_codes': company.get('sic_codes', [])
+                    },
+                    'management': [
+                        {
+                            'name': officer.get('name', ''),
+                            'role': officer.get('officer_role', ''),
+                            'appointed_on': officer.get('appointed_on', ''),
+                            'nationality': officer.get('nationality', ''),
+                            'country_of_residence': officer.get('country_of_residence', '')
+                        }
+                        for officer in officers
+                        if officer.get('officer_role') in ['director', 'secretary', 'person-with-significant-control']
+                    ]
+                }
+                
+            return {}
+            
+        except Exception as e:
+            print(f"Error getting company details: {str(e)}")
+            return {}
+
     def _extract_cuisine_type(self, types: List[str]) -> str:
         cuisine_keywords = {
             'restaurant': ['restaurant', 'food', 'meal'],
+            'takeaway': ['takeaway', 'take-away', 'take away'],
             'indian': ['indian'],
             'chinese': ['chinese'],
             'italian': ['italian'],
             'japanese': ['japanese', 'sushi'],
             'thai': ['thai'],
             'pub': ['pub', 'bar'],
-            'cafe': ['cafe', 'coffee']
+            'cafe': ['cafe', 'coffee'],
+            'fish_and_chips': ['fish', 'chip'],
+            'pizza': ['pizza'],
+            'burger': ['burger'],
+            'kebab': ['kebab']
         }
         
         for cuisine, keywords in cuisine_keywords.items():
             if any(keyword in type.lower() for type in types for keyword in keywords):
-                return cuisine.title()
+                return cuisine.title().replace('_', ' ')
         
-        return 'Restaurant'
+        return 'Restaurant/Takeaway'
 
     def _analyze_reviews(self, reviews: List[Dict]) -> Dict:
         if not reviews:
@@ -165,15 +243,15 @@ class RestaurantScraper:
             'food': 0,
             'service': 0,
             'price': 0,
-            'ambience': 0,
+            'delivery': 0,
             'cleanliness': 0
         }
         
         keywords = {
-            'food': ['food', 'meal', 'dish', 'taste', 'menu'],
-            'service': ['service', 'staff', 'waiter', 'waitress', 'manager'],
-            'price': ['price', 'value', 'expensive', 'cheap'],
-            'ambience': ['ambience', 'atmosphere', 'decor', 'music', 'noise'],
+            'food': ['food', 'meal', 'dish', 'taste', 'menu', 'portion'],
+            'service': ['service', 'staff', 'waiter', 'waitress', 'manager', 'customer service'],
+            'price': ['price', 'value', 'expensive', 'cheap', 'worth'],
+            'delivery': ['delivery', 'deliveroo', 'uber', 'just eat', 'ordered'],
             'cleanliness': ['clean', 'dirty', 'hygiene', 'tidy', 'mess']
         }
         
@@ -225,7 +303,7 @@ class RestaurantScraper:
             
             return {
                 'email': emails[0] if emails else '',
-                'social_media': social_links,
+                'social_media': social_links
             }
             
         except Exception as e:
@@ -238,7 +316,8 @@ class RestaurantScraper:
 def main():
     api_key = os.getenv('GOOGLE_PLACES_API_KEY')
     fsa_api_key = os.getenv('FSA_API_KEY', '')
-    scraper = RestaurantScraper(api_key, fsa_api_key)
+    companies_house_api_key = os.getenv('COMPANIES_HOUSE_API_KEY', '')
+    scraper = RestaurantScraper(api_key, fsa_api_key, companies_house_api_key)
     
     location = "Romford"
     results = scraper.search_restaurants(location)
