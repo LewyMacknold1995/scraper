@@ -1,9 +1,20 @@
 import React, { useState } from 'react';
-import { Search, Download, Star, Clock, ThumbsUp } from 'lucide-react';
+import { Search, Download, Star, Clock, ThumbsUp, Facebook, Phone, Mail } from 'lucide-react';
 
-interface Restaurant {
-  name: string;
+interface ContactInfo {
   email: string;
+  facebook_email: string;
+  contact_emails: string[];
+  facebook_url: string;
+  additional_phones: string[];
+  facebook_info?: {
+    business_owner: string;
+    opening_date: string;
+  };
+}
+
+interface Restaurant extends ContactInfo {
+  name: string;
   phone: string;
   website: string;
   address: string;
@@ -29,7 +40,106 @@ interface Restaurant {
       management: string;
     };
   };
+  company_info?: {
+    company_number: string;
+    date_of_creation: string;
+    company_status: string;
+    sic_codes: string[];
+  };
+  management?: Array<{
+    name: string;
+    role: string;
+    appointed_on: string;
+    nationality: string;
+    country_of_residence: string;
+  }>;
 }
+
+const ContactDetails = ({ restaurant }: { restaurant: Restaurant }) => (
+  <div className="space-y-2">
+    <h4 className="font-semibold flex items-center gap-2">
+      <Mail size={16} /> Contact Information
+    </h4>
+    {restaurant.contact_emails?.length > 0 && (
+      <div className="space-y-1">
+        {Array.from(restaurant.contact_emails).map((email, idx) => (
+          <div key={idx}>
+            <a href={`mailto:${email}`} className="text-blue-500 hover:underline">
+              {email}
+            </a>
+          </div>
+        ))}
+      </div>
+    )}
+    {restaurant.additional_phones?.length > 0 && (
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Phone size={16} />
+          <span className="font-medium">Additional Phones:</span>
+        </div>
+        {restaurant.additional_phones.map((phone, idx) => (
+          <div key={idx}>
+            <a href={`tel:${phone}`} className="text-blue-500 hover:underline">
+              {phone}
+            </a>
+          </div>
+        ))}
+      </div>
+    )}
+    {restaurant.facebook_url && (
+      <div>
+        <a 
+          href={restaurant.facebook_url} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="text-blue-500 hover:underline flex items-center gap-2"
+        >
+          <Facebook size={16} />
+          Facebook Page
+        </a>
+      </div>
+    )}
+  </div>
+);
+
+const BusinessInfo = ({ restaurant }: { restaurant: Restaurant }) => (
+  <div className="mt-4 border-t pt-4">
+    <h4 className="font-semibold mb-2">Business Information</h4>
+    {restaurant.facebook_info?.business_owner && (
+      <div className="text-sm">
+        <span className="font-medium">Owner:</span> {restaurant.facebook_info.business_owner}
+      </div>
+    )}
+    {restaurant.facebook_info?.opening_date && (
+      <div className="text-sm">
+        <span className="font-medium">Established:</span> {restaurant.facebook_info.opening_date}
+      </div>
+    )}
+    {restaurant.company_info && (
+      <div className="mt-2">
+        <div className="text-sm">
+          <span className="font-medium">Company Number:</span> {restaurant.company_info.company_number}
+        </div>
+        <div className="text-sm">
+          <span className="font-medium">Status:</span> {restaurant.company_info.company_status}
+        </div>
+      </div>
+    )}
+    {restaurant.management && restaurant.management.length > 0 && (
+      <div className="mt-2">
+        <div className="font-medium text-sm mb-1">Key Personnel:</div>
+        <div className="space-y-1">
+          {restaurant.management.map((person, idx) => (
+            <div key={idx} className="text-sm">
+              {person.name} - {person.role} 
+              {person.appointed_on && ` (Since ${new Date(person.appointed_on).getFullYear()})`}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+);
 
 const HygieneRating = ({ rating, lastInspection, scores }: any) => {
   const getRatingColor = (rating: string) => {
@@ -95,20 +205,26 @@ const RestaurantFinder = () => {
   const exportToCsv = () => {
     if (results.length === 0) return;
     
-    const headers = ['Name', 'Email', 'Phone', 'Website', 'Address', 'Cuisine', 'Price', 'Rating', 'Reviews', 'Hygiene Rating'];
+    const headers = [
+      'Name', 'Emails', 'Phones', 'Website', 'Address', 'Cuisine', 
+      'Price', 'Rating', 'Reviews', 'Owner', 'Company Number', 'Status'
+    ];
+    
     const csvContent = [
       headers.join(','),
       ...results.map(r => [
         r.name,
-        r.email,
-        r.phone,
+        Array.from(r.contact_emails || []).join(';'),
+        [r.phone, ...(r.additional_phones || [])].filter(Boolean).join(';'),
         r.website,
         r.address,
         r.cuisine_type,
         r.price_level,
         r.rating,
         r.total_reviews,
-        r.hygiene_rating?.rating || 'N/A'
+        r.facebook_info?.business_owner || '',
+        r.company_info?.company_number || '',
+        r.company_info?.company_status || ''
       ].map(field => `"${field || ''}"`).join(','))
     ].join('\n');
 
@@ -194,33 +310,7 @@ const RestaurantFinder = () => {
                   </div>
                   
                   <div className="grid md:grid-cols-2 gap-4 mt-4">
-                    <div>
-                      <h4 className="font-semibold mb-2">Contact Details</h4>
-                      <div className="space-y-1 text-sm">
-                        {restaurant.email && (
-                          <div>
-                            <a href={`mailto:${restaurant.email}`} className="text-blue-500 hover:underline">
-                              {restaurant.email}
-                            </a>
-                          </div>
-                        )}
-                        {restaurant.phone && (
-                          <div>
-                            <a href={`tel:${restaurant.phone}`} className="text-blue-500 hover:underline">
-                              {restaurant.phone}
-                            </a>
-                          </div>
-                        )}
-                        {restaurant.website && (
-                          <div>
-                            <a href={restaurant.website} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                              Visit Website
-                            </a>
-                          </div>
-                        )}
-                        <div className="text-gray-600">{restaurant.address}</div>
-                      </div>
-                    </div>
+                    <ContactDetails restaurant={restaurant} />
                     
                     <div>
                       {restaurant.opening_hours && restaurant.opening_hours.length > 0 && (
@@ -238,6 +328,8 @@ const RestaurantFinder = () => {
                       )}
                     </div>
                   </div>
+
+                  <BusinessInfo restaurant={restaurant} />
 
                   {restaurant.hygiene_rating && (
                     <HygieneRating
