@@ -5,7 +5,6 @@ import os
 from bs4 import BeautifulSoup
 import re
 import time
-from datetime import datetime
 import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 
@@ -16,34 +15,36 @@ class RestaurantScraper:
         self.details_endpoint = "https://maps.googleapis.com/maps/api/place/details/json"
         nltk.download('vader_lexicon', quiet=True)
         self.sia = SentimentIntensityAnalyzer()
-        
+
     def search_restaurants(self, location: str) -> List[Dict]:
         restaurants = []
-        # Include both types in search
-        queries = [
-            f"restaurant in {location}",
-            f"takeaway in {location}",
-            f"food delivery in {location}"
-        ]
-        
         try:
-            for query in queries:
-                url = f"{self.places_endpoint}?query={query}&type=restaurant|food&radius=5000&key={self.google_api_key}"
-                response = requests.get(url)
+            # Base search
+            url = f"{self.places_endpoint}?query=restaurants+takeaways+in+{location}&type=restaurant|food|meal_delivery|meal_takeaway&key={self.google_api_key}"
+            next_page_token = None
+            
+            while True:
+                if next_page_token:
+                    search_url = f"{url}&pagetoken={next_page_token}"
+                else:
+                    search_url = url
+                
+                response = requests.get(search_url)
                 results = response.json()
                 
                 if results.get('status') != 'OK':
-                    continue
+                    break
                 
                 for place in results.get('results', []):
-                    # Check if we already have this place
-                    if not any(r.get('place_id') == place['place_id'] for r in restaurants):
-                        restaurant_data = self._get_place_details(place['place_id'])
-                        if restaurant_data:
-                            restaurant_data['place_id'] = place['place_id']
-                            restaurants.append(restaurant_data)
+                    restaurant_data = self._get_place_details(place['place_id'])
+                    if restaurant_data:
+                        restaurants.append(restaurant_data)
                 
-                time.sleep(2)  # Delay between requests
+                next_page_token = results.get('next_page_token')
+                if not next_page_token:
+                    break
+                    
+                time.sleep(2)  # Required delay between requests
             
             return restaurants
             
@@ -53,53 +54,30 @@ class RestaurantScraper:
 
     def _get_place_details(self, place_id: str) -> Dict:
         try:
-            fields = [
-                'name',
-                'formatted_phone_number',
-                'website',
-                'url',
-                'formatted_address',
-                'opening_hours',
-                'price_level',
-                'rating',
-                'reviews',
-                'user_ratings_total',
-                'types',
-                'business_status',
-                'address_components'
-            ]
-            
-            url = f"{self.details_endpoint}?place_id={place_id}&fields={','.join(fields)}&key={self.google_api_key}"
+            url = f"{self.details_endpoint}?place_id={place_id}&fields=name,formatted_phone_number,website,formatted_address,opening_hours,price_level,rating,reviews,user_ratings_total,types&key={self.google_api_key}"
             response = requests.get(url)
-            details = response.json()
+            result = response.json().get('result', {})
             
-            if details.get('status') != 'OK':
+            if not result:
                 return None
-            
-            result = details.get('result', {})
-            
+
             restaurant_data = {
                 'name': result.get('name', ''),
                 'phone': result.get('formatted_phone_number', ''),
                 'website': result.get('website', ''),
-                'maps_url': result.get('url', ''),
                 'address': result.get('formatted_address', ''),
                 'cuisine_type': self._extract_cuisine_type(result.get('types', [])),
                 'price_level': '£' * (result.get('price_level', 1) or 1),
                 'rating': result.get('rating', 0),
                 'total_reviews': result.get('user_ratings_total', 0),
-                'business_status': result.get('business_status', ''),
                 'opening_hours': result.get('opening_hours', {}).get('weekday_text', []),
                 'review_stats': self._analyze_reviews(result.get('reviews', [])),
                 'email': ''
             }
             
-            # Scrape website if available
+            # Try to find email if website exists
             if restaurant_data['website']:
-                website_data = self._scrape_website_data(restaurant_data['website'])
-                if website_data.get('email'):
-                    restaurant_data['email'] = website_data['email']
-                restaurant_data.update(website_data)
+                restaurant_data['email'] = self._scrape_website_email(restaurant_data['website'])
             
             return restaurant_data
             
@@ -109,27 +87,28 @@ class RestaurantScraper:
 
     def _extract_cuisine_type(self, types: List[str]) -> str:
         cuisine_keywords = {
-            'restaurant': ['restaurant', 'dining', 'bistro', 'eatery'],
-            'takeaway': ['takeaway', 'take-away', 'delivery'],
-            'indian': ['indian', 'curry', 'tandoori'],
-            'chinese': ['chinese', 'oriental', 'wok'],
-            'pizza': ['pizza', 'pizzeria'],
-            'fish_and_chips': ['fish', 'chip', 'chippy'],
-            'kebab': ['kebab', 'shawarma', 'donner'],
-            'burger': ['burger', 'hamburger'],
+            'restaurant': ['restaurant', 'dining'],
+            'takeaway': ['takeaway', 'take_away', 'meal_delivery', 'meal_takeaway'],
+            'indian': ['indian'],
+            'chinese': ['chinese'],
+            'pizza': ['pizza'],
+            'fish_and_chips': ['fish_and_chips', 'fish'],
+            'kebab': ['kebab'],
+            'burger': ['burger'],
             'thai': ['thai'],
             'japanese': ['japanese', 'sushi'],
-            'pub_food': ['pub', 'bar', 'tavern'],
-            'cafe': ['cafe', 'coffee', 'bistro'],
-            'italian': ['italian', 'pasta'],
-            'chicken': ['chicken', 'peri', 'fried chicken']
+            'italian': ['italian'],
+            'pub_food': ['pub', 'bar'],
+            'cafe': ['cafe', 'coffee'],
+            'chicken': ['chicken', 'peri']
         }
         
+        found_types = []
         for cuisine, keywords in cuisine_keywords.items():
-            if any(keyword in type.lower() for type in types for keyword in keywords):
-                return cuisine.title().replace('_', ' ')
+            if any(keyword in str(types).lower() for keyword in keywords):
+                found_types.append(cuisine.replace('_', ' ').title())
         
-        return 'Restaurant/Takeaway'
+        return ' & '.join(found_types) if found_types else 'Restaurant/Takeaway'
 
     def _analyze_reviews(self, reviews: List[Dict]) -> Dict:
         if not reviews:
@@ -150,11 +129,11 @@ class RestaurantScraper:
         }
         
         keywords = {
-            'food': ['food', 'meal', 'dish', 'taste', 'menu', 'portion'],
-            'service': ['service', 'staff', 'waiter', 'waitress', 'manager'],
-            'price': ['price', 'value', 'expensive', 'cheap', 'worth'],
-            'delivery': ['delivery', 'deliveroo', 'uber', 'just eat', 'ordered'],
-            'cleanliness': ['clean', 'dirty', 'hygiene', 'tidy', 'mess']
+            'food': ['food', 'meal', 'dish', 'taste', 'menu'],
+            'service': ['service', 'staff', 'waiter', 'waitress'],
+            'price': ['price', 'value', 'expensive', 'cheap'],
+            'delivery': ['delivery', 'deliveroo', 'uber', 'just eat'],
+            'cleanliness': ['clean', 'dirty', 'hygiene']
         }
         
         for review in reviews:
@@ -179,7 +158,7 @@ class RestaurantScraper:
             'keyword_mentions': keyword_mentions
         }
 
-    def _scrape_website_data(self, url: str) -> Dict:
+    def _scrape_website_email(self, url: str) -> str:
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -187,40 +166,22 @@ class RestaurantScraper:
             response = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Extract emails
-            page_text = str(soup)
+            # Look for email in text
             email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-            emails = re.findall(email_pattern, page_text)
+            emails = re.findall(email_pattern, str(soup))
             
-            return {
-                'email': emails[0] if emails else '',
-                'social_media': self._extract_social_links(soup)
-            }
+            # Filter out common false positives
+            valid_emails = [
+                email for email in emails
+                if not any(exclude in email.lower()
+                    for exclude in ['example', 'domain', 'email', '@your', '@site'])
+            ]
+            
+            return valid_emails[0] if valid_emails else ''
             
         except Exception as e:
             print(f"Error scraping website: {str(e)}")
-            return {
-                'email': '',
-                'social_media': {}
-            }
-
-    def _extract_social_links(self, soup: BeautifulSoup) -> Dict:
-        social_links = {
-            'facebook': None,
-            'instagram': None,
-            'twitter': None
-        }
-        
-        for link in soup.find_all('a', href=True):
-            href = link['href'].lower()
-            if 'facebook.com' in href:
-                social_links['facebook'] = href
-            elif 'instagram.com' in href:
-                social_links['instagram'] = href
-            elif 'twitter.com' in href:
-                social_links['twitter'] = href
-                
-        return social_links
+            return ''
 
 if __name__ == "__main__":
     api_key = os.getenv('GOOGLE_PLACES_API_KEY')
