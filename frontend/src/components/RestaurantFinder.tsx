@@ -1,20 +1,9 @@
 import React, { useState } from 'react';
-import { Search, Download, Star, Clock, ThumbsUp, Facebook, Phone, Mail } from 'lucide-react';
+import { Search, Download, Star, Clock, ThumbsUp, Mail, Phone, Globe, MapPin } from 'lucide-react';
 
-interface ContactInfo {
-  email: string;
-  facebook_email: string;
-  contact_emails: string[];
-  facebook_url: string;
-  additional_phones: string[];
-  facebook_info?: {
-    business_owner: string;
-    opening_date: string;
-  };
-}
-
-interface Restaurant extends ContactInfo {
+interface Restaurant {
   name: string;
+  email: string;
   phone: string;
   website: string;
   address: string;
@@ -31,141 +20,92 @@ interface Restaurant extends ContactInfo {
       sentiment: number;
     }>;
   };
-  hygiene_rating?: {
-    rating: string;
-    last_inspection: string;
-    scores: {
-      food_hygiene: string;
-      structural: string;
-      management: string;
-    };
-  };
-  company_info?: {
-    company_number: string;
-    date_of_creation: string;
-    company_status: string;
-    sic_codes: string[];
-  };
-  management?: Array<{
-    name: string;
-    role: string;
-    appointed_on: string;
-    nationality: string;
-    country_of_residence: string;
-  }>;
 }
 
-const ContactDetails = ({ restaurant }: { restaurant: Restaurant }) => (
-  <div className="space-y-2">
-    <h4 className="font-semibold flex items-center gap-2">
-      <Mail size={16} /> Contact Information
-    </h4>
-    {restaurant.contact_emails?.length > 0 && (
-      <div className="space-y-1">
-        {Array.from(restaurant.contact_emails).map((email, idx) => (
-          <div key={idx}>
-            <a href={`mailto:${email}`} className="text-blue-500 hover:underline">
-              {email}
-            </a>
-          </div>
-        ))}
-      </div>
-    )}
-    {restaurant.additional_phones?.length > 0 && (
-      <div className="space-y-1">
+const ContactInformation = ({ restaurant }: { restaurant: Restaurant }) => (
+  <div className="mb-4">
+    <h3 className="font-semibold mb-2 flex items-center gap-2">
+      <Mail size={16} />
+      Contact Information
+    </h3>
+    <div className="space-y-2">
+      {restaurant.phone && (
         <div className="flex items-center gap-2">
-          <Phone size={16} />
-          <span className="font-medium">Additional Phones:</span>
+          <Phone size={16} className="text-gray-600" />
+          <a href={`tel:${restaurant.phone}`} className="text-blue-500 hover:underline">
+            {restaurant.phone}
+          </a>
         </div>
-        {restaurant.additional_phones.map((phone, idx) => (
-          <div key={idx}>
-            <a href={`tel:${phone}`} className="text-blue-500 hover:underline">
-              {phone}
-            </a>
-          </div>
-        ))}
+      )}
+      {restaurant.email && (
+        <div className="flex items-center gap-2">
+          <Mail size={16} className="text-gray-600" />
+          <a href={`mailto:${restaurant.email}`} className="text-blue-500 hover:underline">
+            {restaurant.email}
+          </a>
+        </div>
+      )}
+      {restaurant.website && (
+        <div className="flex items-center gap-2">
+          <Globe size={16} className="text-gray-600" />
+          <a href={restaurant.website} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+            Visit Website
+          </a>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <MapPin size={16} className="text-gray-600 flex-shrink-0" />
+        <span>{restaurant.address}</span>
       </div>
-    )}
-    {restaurant.facebook_url && (
-      <div>
-        <a 
-          href={restaurant.facebook_url} 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="text-blue-500 hover:underline flex items-center gap-2"
-        >
-          <Facebook size={16} />
-          Facebook Page
-        </a>
-      </div>
-    )}
+    </div>
   </div>
 );
 
-const BusinessInfo = ({ restaurant }: { restaurant: Restaurant }) => (
-  <div className="mt-4 border-t pt-4">
-    <h4 className="font-semibold mb-2">Business Information</h4>
-    {restaurant.facebook_info?.business_owner && (
-      <div className="text-sm">
-        <span className="font-medium">Owner:</span> {restaurant.facebook_info.business_owner}
-      </div>
-    )}
-    {restaurant.facebook_info?.opening_date && (
-      <div className="text-sm">
-        <span className="font-medium">Established:</span> {restaurant.facebook_info.opening_date}
-      </div>
-    )}
-    {restaurant.company_info && (
-      <div className="mt-2">
-        <div className="text-sm">
-          <span className="font-medium">Company Number:</span> {restaurant.company_info.company_number}
+const OpeningHours = ({ hours }: { hours: string[] }) => (
+  <div className="mb-4">
+    <h3 className="font-semibold mb-2 flex items-center gap-2">
+      <Clock size={16} />
+      Opening Hours
+    </h3>
+    <div className="space-y-1 text-sm">
+      {hours.map((hour, idx) => (
+        <div key={idx} className="text-gray-600">
+          {hour}
         </div>
-        <div className="text-sm">
-          <span className="font-medium">Status:</span> {restaurant.company_info.company_status}
-        </div>
-      </div>
-    )}
-    {restaurant.management && restaurant.management.length > 0 && (
-      <div className="mt-2">
-        <div className="font-medium text-sm mb-1">Key Personnel:</div>
-        <div className="space-y-1">
-          {restaurant.management.map((person, idx) => (
-            <div key={idx} className="text-sm">
-              {person.name} - {person.role} 
-              {person.appointed_on && ` (Since ${new Date(person.appointed_on).getFullYear()})`}
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
+      ))}
+    </div>
   </div>
 );
 
-const HygieneRating = ({ rating, lastInspection, scores }: any) => {
-  const getRatingColor = (rating: string) => {
-    const num = parseInt(rating);
-    if (num >= 4) return 'text-green-500';
-    if (num >= 3) return 'text-yellow-500';
+const ReviewAnalysis = ({ stats }) => {
+  const getSentimentColor = (sentiment: number) => {
+    if (sentiment > 0.5) return 'text-green-500';
+    if (sentiment > 0) return 'text-blue-500';
+    if (sentiment > -0.5) return 'text-yellow-500';
     return 'text-red-500';
   };
 
   return (
     <div className="mt-4 border-t pt-4">
-      <h4 className="font-semibold mb-2">Food Hygiene Rating</h4>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <div className={`text-2xl font-bold ${getRatingColor(rating)}`}>
-            {rating} / 5
-          </div>
-          <div className="text-sm text-gray-600">
-            Last Inspection: {new Date(lastInspection).toLocaleDateString()}
-          </div>
+      <h3 className="font-semibold mb-2 flex items-center gap-2">
+        <ThumbsUp size={16} />
+        Review Analysis
+      </h3>
+      <div>
+        <div className={`font-medium ${getSentimentColor(stats.average_sentiment)}`}>
+          Sentiment Score: {(stats.average_sentiment * 100).toFixed(1)}%
         </div>
-        {scores && (
-          <div className="text-sm space-y-1">
-            <div>Food Hygiene: {scores.food_hygiene}</div>
-            <div>Structural: {scores.structural}</div>
-            <div>Management: {scores.management}</div>
+        {stats.recent_reviews?.length > 0 && (
+          <div className="mt-2 space-y-2">
+            {stats.recent_reviews.map((review, idx) => (
+              <div key={idx} className="text-gray-600 text-sm">
+                "{review.text}"
+                <div className="flex items-center gap-1 mt-1">
+                  <Star size={14} className="text-yellow-400" />
+                  {review.rating}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -205,26 +145,19 @@ const RestaurantFinder = () => {
   const exportToCsv = () => {
     if (results.length === 0) return;
     
-    const headers = [
-      'Name', 'Emails', 'Phones', 'Website', 'Address', 'Cuisine', 
-      'Price', 'Rating', 'Reviews', 'Owner', 'Company Number', 'Status'
-    ];
-    
+    const headers = ['Name', 'Email', 'Phone', 'Website', 'Address', 'Cuisine', 'Price', 'Rating', 'Reviews'];
     const csvContent = [
       headers.join(','),
       ...results.map(r => [
         r.name,
-        Array.from(r.contact_emails || []).join(';'),
-        [r.phone, ...(r.additional_phones || [])].filter(Boolean).join(';'),
+        r.email,
+        r.phone,
         r.website,
         r.address,
         r.cuisine_type,
         r.price_level,
         r.rating,
-        r.total_reviews,
-        r.facebook_info?.business_owner || '',
-        r.company_info?.company_number || '',
-        r.company_info?.company_status || ''
+        r.total_reviews
       ].map(field => `"${field || ''}"`).join(','))
     ].join('\n');
 
@@ -237,13 +170,6 @@ const RestaurantFinder = () => {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
-  };
-
-  const getSentimentColor = (sentiment: number) => {
-    if (sentiment > 0.5) return 'text-green-500';
-    if (sentiment > 0) return 'text-blue-500';
-    if (sentiment > -0.5) return 'text-yellow-500';
-    return 'text-red-500';
   };
 
   return (
@@ -309,61 +235,15 @@ const RestaurantFinder = () => {
                     </div>
                   </div>
                   
-                  <div className="grid md:grid-cols-2 gap-4 mt-4">
-                    <ContactDetails restaurant={restaurant} />
-                    
-                    <div>
-                      {restaurant.opening_hours && restaurant.opening_hours.length > 0 && (
-                        <div>
-                          <h4 className="font-semibold mb-2 flex items-center gap-2">
-                            <Clock size={16} />
-                            Opening Hours
-                          </h4>
-                          <div className="text-sm space-y-1">
-                            {restaurant.opening_hours.map((hours, idx) => (
-                              <div key={idx} className="text-gray-600">{hours}</div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <ContactInformation restaurant={restaurant} />
+                    {restaurant.opening_hours?.length > 0 && (
+                      <OpeningHours hours={restaurant.opening_hours} />
+                    )}
                   </div>
 
-                  <BusinessInfo restaurant={restaurant} />
-
-                  {restaurant.hygiene_rating && (
-                    <HygieneRating
-                      rating={restaurant.hygiene_rating.rating}
-                      lastInspection={restaurant.hygiene_rating.last_inspection}
-                      scores={restaurant.hygiene_rating.scores}
-                    />
-                  )}
-
                   {restaurant.review_stats && (
-                    <div className="mt-4 border-t pt-4">
-                      <h4 className="font-semibold mb-2 flex items-center gap-2">
-                        <ThumbsUp size={16} />
-                        Review Analysis
-                      </h4>
-                      <div className="text-sm">
-                        <div className={`font-medium ${getSentimentColor(restaurant.review_stats.average_sentiment)}`}>
-                          Sentiment Score: {(restaurant.review_stats.average_sentiment * 100).toFixed(1)}%
-                        </div>
-                        {restaurant.review_stats.recent_reviews && (
-                          <div className="mt-2 space-y-2">
-                            {restaurant.review_stats.recent_reviews.map((review, idx) => (
-                              <div key={idx} className="text-gray-600 text-sm">
-                                "{review.text}"
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Star size={14} className="text-yellow-400" />
-                                  {review.rating}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <ReviewAnalysis stats={restaurant.review_stats} />
                   )}
                 </div>
               ))}
