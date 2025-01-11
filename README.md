@@ -1,6 +1,3 @@
-import os
-
-readme_content = """# 🧛‍♂️ Restaurant Lead Hunter 🦇
 
 ## The Solution to Restaurant Sales Teams' Time Vampire 🩸
 
