@@ -16,24 +16,40 @@ class RestaurantScraper:
         self.details_endpoint = "https://maps.googleapis.com/maps/api/place/details/json"
         nltk.download('vader_lexicon', quiet=True)
         self.sia = SentimentIntensityAnalyzer()
-
+        
     def search_restaurants(self, location: str) -> List[Dict]:
         restaurants = []
-        query = f"(restaurant OR takeaway OR food) in {location}"
+        query = f"restaurants in {location}"
+        next_page_token = None
         
         try:
-            url = f"{self.places_endpoint}?query={query}&type=restaurant|food&key={self.google_api_key}"
-            response = requests.get(url)
-            results = response.json()
+            while True:
+                url = f"{self.places_endpoint}?query={query}&type=restaurant|food&radius=5000&key={self.google_api_key}"
+                if next_page_token:
+                    url += f"&pagetoken={next_page_token}"
+                
+                print(f"Fetching from URL: {url}")  # Debug print
+                response = requests.get(url)
+                results = response.json()
+                
+                if results.get('status') != 'OK':
+                    print(f"API Status not OK: {results.get('status')}")  # Debug print
+                    break
+                
+                for place in results.get('results', []):
+                    restaurant_data = self._get_place_details(place['place_id'])
+                    if restaurant_data:
+                        restaurants.append(restaurant_data)
+                        print(f"Added restaurant: {restaurant_data['name']}")  # Debug print
+                
+                next_page_token = results.get('next_page_token')
+                if not next_page_token:
+                    break
+                    
+                # Wait between requests
+                time.sleep(2)
             
-            if results.get('status') != 'OK':
-                raise Exception(f"API request failed: {results.get('status')}")
-            
-            for place in results.get('results', []):
-                restaurant_data = self._get_place_details(place['place_id'])
-                if restaurant_data:
-                    restaurants.append(restaurant_data)
-            
+            print(f"Total restaurants found: {len(restaurants)}")  # Debug print
             return restaurants
             
         except Exception as e:
@@ -43,9 +59,20 @@ class RestaurantScraper:
     def _get_place_details(self, place_id: str) -> Dict:
         try:
             fields = [
-                'name', 'formatted_phone_number', 'website', 'formatted_address',
-                'opening_hours', 'price_level', 'rating', 'reviews', 'user_ratings_total',
-                'types', 'business_status'
+                'name',
+                'formatted_phone_number',
+                'international_phone_number',
+                'website',
+                'url',
+                'formatted_address',
+                'opening_hours',
+                'price_level',
+                'rating',
+                'reviews',
+                'user_ratings_total',
+                'types',
+                'business_status',
+                'address_components'
             ]
             
             url = f"{self.details_endpoint}?place_id={place_id}&fields={','.join(fields)}&key={self.google_api_key}"
@@ -53,6 +80,7 @@ class RestaurantScraper:
             details = response.json()
             
             if details.get('status') != 'OK':
+                print(f"Place details API error: {details.get('status')}")  # Debug print
                 return None
             
             result = details.get('result', {})
@@ -60,7 +88,9 @@ class RestaurantScraper:
             restaurant_data = {
                 'name': result.get('name', ''),
                 'phone': result.get('formatted_phone_number', ''),
+                'intl_phone': result.get('international_phone_number', ''),
                 'website': result.get('website', ''),
+                'maps_url': result.get('url', ''),
                 'address': result.get('formatted_address', ''),
                 'cuisine_type': self._extract_cuisine_type(result.get('types', [])),
                 'price_level': '£' * (result.get('price_level', 1) or 1),
@@ -69,12 +99,31 @@ class RestaurantScraper:
                 'business_status': result.get('business_status', ''),
                 'opening_hours': result.get('opening_hours', {}).get('weekday_text', []),
                 'review_stats': self._analyze_reviews(result.get('reviews', [])),
-                'email': ''
+                'email': '',
+                'contact_emails': set(),
+                'social_media': {},
+                'additional_phones': set()
             }
             
+            # Add phone to additional phones if exists
+            if restaurant_data['phone']:
+                restaurant_data['additional_phones'].add(restaurant_data['phone'])
+            if restaurant_data['intl_phone']:
+                restaurant_data['additional_phones'].add(restaurant_data['intl_phone'])
+            
+            # Scrape website if available
             if restaurant_data['website']:
                 website_data = self._scrape_website_data(restaurant_data['website'])
-                restaurant_data.update(website_data)
+                if website_data.get('email'):
+                    restaurant_data['email'] = website_data['email']
+                    restaurant_data['contact_emails'].add(website_data['email'])
+                restaurant_data['social_media'].update(website_data.get('social_media', {}))
+                if website_data.get('additional_phones'):
+                    restaurant_data['additional_phones'].update(website_data['additional_phones'])
+            
+            # Convert sets to lists for JSON serialization
+            restaurant_data['contact_emails'] = list(restaurant_data['contact_emails'])
+            restaurant_data['additional_phones'] = list(restaurant_data['additional_phones'])
             
             return restaurant_data
             
@@ -155,13 +204,22 @@ class RestaurantScraper:
 
     def _scrape_website_data(self, url: str) -> Dict:
         try:
-            response = requests.get(url, timeout=10)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
             
+            # Extract emails
             page_text = str(soup)
             email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
             emails = re.findall(email_pattern, page_text)
             
+            # Extract phone numbers
+            phone_pattern = r'\+44\s?\d{4}\s?\d{6}|\(?0\d{4}\)?\s?\d{6}|\(?0\d{3}\)?\s?\d{3}\s?\d{4}'
+            phones = re.findall(phone_pattern, page_text)
+            
+            # Extract social media links
             social_links = {
                 'facebook': None,
                 'instagram': None,
@@ -179,6 +237,7 @@ class RestaurantScraper:
             
             return {
                 'email': emails[0] if emails else '',
+                'additional_phones': phones,
                 'social_media': social_links
             }
             
@@ -186,6 +245,7 @@ class RestaurantScraper:
             print(f"Error scraping website: {str(e)}")
             return {
                 'email': '',
+                'additional_phones': [],
                 'social_media': {}
             }
 
